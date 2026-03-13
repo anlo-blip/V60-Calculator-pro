@@ -647,7 +647,7 @@
                 <label id="processLabel" for="process">المعالجة</label>
                 <select id="process">
                     <option value="washed" selected id="opt-process-washed">مغسول</option>
-                    <option value="honey" id="opt-process-honey">هوني</option>
+                    <option value="Aerobic" id="opt-process-Aerobic">هوائي</option>
                     <option value="natural" id="opt-process-natural">مجفف</option>
                 </select>
             </div>
@@ -808,7 +808,7 @@
                     'acidity-high': 'إبراز حموضة عالية'
                 },
                 bodyOptions: { light: 'خفيف', medium: 'متوسط', heavy: 'ثقيل' },
-                processOptions: { washed: 'مغسول', honey: 'هوني', natural: 'مجفف' },
+                processOptions: { washed: 'مغسول', Aerobic: 'هوائي', natural: 'مجفف' },
                 roastOptions: { light: 'فاتح', medium: 'متوسط' },
                 summaryLabels: {
                     coffeeWeight: 'وزن البن',
@@ -903,7 +903,7 @@
                     'acidity-high': 'High acidity emphasis'
                 },
                 bodyOptions: { light: 'Light', medium: 'Medium', heavy: 'Heavy' },
-                processOptions: { washed: 'Washed', honey: 'Honey', natural: 'Natural' },
+                processOptions: { washed: 'Washed', aerobic: 'Aerobic', natural: 'Natural' },
                 roastOptions: { light: 'Light', medium: 'Medium' },
                 summaryLabels: {
                     coffeeWeight: 'Coffee dose',
@@ -1020,7 +1020,7 @@
             document.getElementById('opt-body-heavy').textContent = t.bodyOptions.heavy;
 
             document.getElementById('opt-process-washed').textContent = t.processOptions.washed;
-            document.getElementById('opt-process-honey').textContent = t.processOptions.honey;
+            document.getElementById('opt-process-aerobic').textContent = t.processOptions.aerobic;
             document.getElementById('opt-process-natural').textContent = t.processOptions.natural;
 
             document.getElementById('opt-roast-light').textContent = t.roastOptions.light;
