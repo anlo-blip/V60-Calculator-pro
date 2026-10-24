@@ -79,7 +79,12 @@ function validate(recipe, grinder) {
     };
   });
   if(Math.abs(pours.reduce((s,p)=>s+p.volume,0)-recipe.water)>0.01)throw new Error('pour_total_mismatch');
-  return {pours,ratio:+(recipe.water/recipe.dose).toFixed(4)};
+  // Conservative compatibility policy for the private beta: whole-ml water total
+  // must align exactly with a half-step brew ratio. This is not a verified xBloom API requirement.
+  const ratio=recipe.water/recipe.dose;
+  const halfStepRatio=Math.round(ratio*2)/2;
+  if(Math.abs(recipe.dose*halfStepRatio-recipe.water)>0.01)throw new Error('ratio_not_aligned');
+  return {pours,ratio:halfStepRatio};
 }
 // Official xBloom share IDs are opaque; base64(tableId) is NOT a valid share ID.
 function officialShareUrl(value) {
