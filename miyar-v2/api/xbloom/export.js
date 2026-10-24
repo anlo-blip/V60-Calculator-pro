@@ -5,7 +5,7 @@
  * ALL credentials are kept in Vercel's encrypted environment variables.
  * No public exports: requires a private admin key and opt-in flag.
  */
-import { publicEncrypt, constants, timingSafeEqual } from 'node:crypto';
+import { publicEncrypt, constants, timingSafeEqual, createHash } from 'node:crypto';
 
 const API = 'https://client-api.xbloom.com';
 const SHARE = 'https://share-h5.xbloom.com/';
@@ -79,12 +79,11 @@ function validate(recipe, grinder) {
     };
   });
   if(Math.abs(pours.reduce((s,p)=>s+p.volume,0)-recipe.water)>0.01)throw new Error('pour_total_mismatch');
-  // Conservative compatibility policy for the private beta: whole-ml water total
-  // must align exactly with a half-step brew ratio. This is not a verified xBloom API requirement.
+  // Keep the original recipe volume, dose and ratio. Half-step ratios are not
+  // a documented xBloom requirement, and silently changing water harms recipes.
   const ratio=recipe.water/recipe.dose;
-  const halfStepRatio=Math.round(ratio*2)/2;
-  if(Math.abs(recipe.dose*halfStepRatio-recipe.water)>0.01)throw new Error('ratio_not_aligned');
-  return {pours,ratio:halfStepRatio};
+  if(!Number.isFinite(ratio)||ratio<8||ratio>22)throw new Error('invalid_brew_ratio');
+  return {pours,ratio:Number(ratio.toFixed(4))};
 }
 // Official xBloom share IDs are opaque; base64(tableId) is NOT a valid share ID.
 function officialShareUrl(value) {
@@ -107,6 +106,15 @@ function authForList(creds){
 async function listOwnRecipes(creds){
   const data=await apiCall('tuMyTeaRecipeCreated.tuhtml',authForList(creds),true);
   return data.result==='success'&&Array.isArray(data.list)?data.list:null;
+}
+function providerRecipeName(recipe,prepared) {
+  const canonical=JSON.stringify({
+    name:recipe.name, dose:recipe.dose, ratio:prepared.ratio,
+    water:recipe.water, grind:recipe.grind, rpm:recipe.rpm,
+    pours:prepared.pours
+  });
+  const fp=createHash('sha256').update(canonical).digest('hex').slice(0,12);
+  return {name:recipe.name.trim().slice(0,78)+' · MYR-'+fp, fingerprint:fp};
 }
 async function verifyOfficialShare(url,expectedTableId,expectedDose){
   const share=officialShareUrl(url);
@@ -183,8 +191,32 @@ export default async function handler(req,res){
       memberId:login.member.tableId,clientType:2,languageType:1,token:login.token
     };
     const recipe=input.recipe;
+    // Check for this exact brew fingerprint BEFORE any write. A previous write
+    // may have succeeded even when client-side verification was delayed.
+    const labeled=providerRecipeName(recipe,prepared);
+    const existingList=await listOwnRecipes({
+      memberId:login.member.tableId,token:login.token
+    });
+    if(!existingList)return fail(res,502,'xbloom_preflight_list_failed');
+    const existing=existingList.find(r=>String(r.theName)===labeled.name);
+    if(existing){
+      const existingUrl=officialShareUrl(existing.shareRecipeLink);
+      if(existingUrl){
+        const valid=await verifyOfficialShare(existingUrl,existing.tableId,recipe.dose)
+          .catch(()=>false);
+        return res.status(valid?200:202).json({
+          status:valid?'ready':'saved_unverified',shareUrl:existingUrl,
+          verified:valid,existing:true,retry:false,
+          ...(valid?{}:{error:'share_verification_pending'})
+        });
+      }
+      return res.status(202).json({
+        status:'saved_unverified',error:'official_share_link_pending',
+        existing:true,verified:false,retry:false
+      });
+    }
     const payload={
-      ...auth,theName:recipe.name,dose:recipe.dose,grandWater:prepared.ratio,
+      ...auth,theName:labeled.name,dose:recipe.dose,grandWater:prepared.ratio,
       grinderSize:recipe.grind,rpm:recipe.rpm,
       cupType:2,adaptedModel:1,isEnableBypassWater:2,isSetGrinderSize:1,
       theColor:'#C9D5B8',theSubsetId:0,bypassTemp:85.0,bypassVolume:5.0,
