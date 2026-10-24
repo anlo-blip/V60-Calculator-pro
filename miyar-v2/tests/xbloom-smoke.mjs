@@ -18,7 +18,10 @@ for(let water=120;water<=288;water++){
   for(const variant of ['balanced','aroma']){
     const recipe=engine.makeRecipe({water,name:'Audit Sample',dripper:'omni'},variant);
     assert.equal(engine.validate(recipe).length,0,'Invalid calculated recipe '+water+' '+variant);
-    assert.equal(recipe.pours.reduce((sum,p)=>sum+p.ml,0),water);
+    assert.equal(recipe.pours.reduce((sum,p)=>sum+p.ml,0),recipe.water);
+    assert.ok(Math.abs(recipe.water-water)<=8,'Water adjustment exceeds 8 ml');
+    assert.ok(Math.abs((recipe.water/recipe.dose)*2-Math.round((recipe.water/recipe.dose)*2))<1e-7,'Ratio must be half-step');
+    assert.ok(Math.abs(recipe.dose*recipe.ratio-recipe.water)<1e-7,'Dose × ratio must equal water');
     assert.ok(recipe.grind>=1&&recipe.grind<=80);
     assert.ok(recipe.rpm>=60&&recipe.rpm<=120);
     assert.ok(recipe.pours.every(p=>p.temp>=40&&p.temp<=95&&p.flow>=3&&p.flow<=3.5));
@@ -31,10 +34,10 @@ process.env.XBLOOM_LOGIN_EMAIL='fixture@example.invalid';
 process.env.XBLOOM_LOGIN_PASSWORD='TEST_ONLY_PASSWORD';
 const recipe={
  schema:'miyar.recipe.v2',device:'studio',dripper:'omni',
- name:'Audit Fixture',dose:15.6,water:250,grind:47,rpm:90,
+ name:'Audit Fixture',dose:15.5,water:248,grind:47,rpm:90,
  pours:[
   {ml:45,temp:92,flow:3,pattern:'center',pause:30,before:false,after:true},
-  {ml:75,temp:92,flow:3.2,pattern:'spiral',pause:12,before:false,after:false},
+  {ml:73,temp:92,flow:3.2,pattern:'spiral',pause:12,before:false,after:false},
   {ml:70,temp:92,flow:3.3,pattern:'circular',pause:10,before:false,after:false},
   {ml:60,temp:91,flow:3.2,pattern:'center',pause:0,before:false,after:false}
  ]
@@ -100,5 +103,5 @@ try{
  const noKey=await send({recipe},'wrong-key');
  assert.equal(noKey.statusCode,401);
  assert.equal(createCalls,2,'Invalid recipes must never be written');
- console.log('PASS: 338 recipe variants, frontend syntax, provider save/link, idempotency, failure handling and access control');
+ console.log('PASS: 338 xBloom-compatible recipe variants, UI syntax, share links, idempotency and validation');
 }finally{globalThis.fetch=originalFetch;}
