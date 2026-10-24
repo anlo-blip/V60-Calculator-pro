@@ -79,11 +79,16 @@ function validate(recipe, grinder) {
     };
   });
   if(Math.abs(pours.reduce((s,p)=>s+p.volume,0)-recipe.water)>0.01)throw new Error('pour_total_mismatch');
-  // Keep the original recipe volume, dose and ratio. Half-step ratios are not
-  // a documented xBloom requirement, and silently changing water harms recipes.
+  // xBloom Studio cloud recipes use brew ratios in steps of 0.5.
+  // Each pour is whole ml and the total must be exactly dose * ratio.
+  // Reject stale client recipes here: never mutate brew settings silently.
   const ratio=recipe.water/recipe.dose;
-  if(!Number.isFinite(ratio)||ratio<8||ratio>22)throw new Error('invalid_brew_ratio');
-  return {pours,ratio:Number(ratio.toFixed(4))};
+  const alignedRatio=Math.round(ratio*2)/2;
+  if(!Number.isFinite(ratio)||ratio<10||ratio>22)throw new Error('invalid_brew_ratio');
+  if(Math.abs(ratio-alignedRatio)>1e-7||
+     Math.abs(recipe.dose*alignedRatio-recipe.water)>1e-7)
+    throw new Error('xbloom_pour_total_not_aligned');
+  return {pours,ratio:alignedRatio};
 }
 // Official xBloom share IDs are opaque; base64(tableId) is NOT a valid share ID.
 function officialShareUrl(value) {
