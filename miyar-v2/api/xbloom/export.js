@@ -60,9 +60,10 @@ function validate(recipe, grinder) {
   if(!Number.isFinite(recipe.dose)||recipe.dose<5||recipe.dose>18)throw new Error('invalid_dose');
   if(!Number.isFinite(recipe.water)||recipe.water<120||recipe.water>288)throw new Error('invalid_total_water');
   if(!Number.isInteger(recipe.rpm)||recipe.rpm<60||recipe.rpm>120)throw new Error('invalid_rpm');
-  // Miyar displays 1..80; unofficial API documentation says 40..120.
-  // We require a separately verified API grinder setting, never guess a conversion.
-  if(!Number.isInteger(grinder)||grinder<40||grinder>120)throw new Error('grinder_calibration_required');
+  // xBloom Studio grinder size is 1..80; 60..120 is the separate RPM range.
+  // Use the recipe's own validated grind size without asking for another number.
+  if(!Number.isInteger(recipe.grind)||recipe.grind<1||recipe.grind>80)throw new Error('invalid_grind_size');
+  if(grinder!==undefined && grinder!==recipe.grind)throw new Error('grind_mismatch');
   if(!Array.isArray(recipe.pours)||recipe.pours.length<1||recipe.pours.length>8)throw new Error('invalid_pours');
   const patterns={center:1,spiral:2,circular:3};
   const pours=recipe.pours.map((p,i)=>{
@@ -127,7 +128,7 @@ export default async function handler(req,res){
     }
   }
   let prepared;
-  try {prepared=validate(input.recipe,input.verifiedGrinderSize);}
+  try {prepared=validate(input.recipe);}
   catch(e){return fail(res,422,e.message);}
   try {
     const login=await apiCall('tMemberLogin.thtml',{
@@ -142,7 +143,7 @@ export default async function handler(req,res){
     const recipe=input.recipe;
     const payload={
       ...auth,theName:recipe.name,dose:recipe.dose,grandWater:prepared.ratio,
-      grinderSize:input.verifiedGrinderSize,rpm:recipe.rpm,
+      grinderSize:recipe.grind,rpm:recipe.rpm,
       cupType:2,adaptedModel:1,isEnableBypassWater:2,isSetGrinderSize:1,
       theColor:'#C9D5B8',theSubsetId:0,bypassTemp:85.0,bypassVolume:5.0,
       subSetType:2,appPlace:[4],createTimeStamp:Date.now(),isShortcuts:2,
