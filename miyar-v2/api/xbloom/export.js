@@ -81,6 +81,40 @@ function validate(recipe, grinder) {
   if(Math.abs(pours.reduce((s,p)=>s+p.volume,0)-recipe.water)>0.01)throw new Error('pour_total_mismatch');
   return {pours,ratio:+(recipe.water/recipe.dose).toFixed(4)};
 }
+// Official xBloom share IDs are opaque; base64(tableId) is NOT a valid share ID.
+function officialShareUrl(value) {
+  if(typeof value!=='string'||value.length>500)return null;
+  try {
+    const u=new URL(value);
+    if(u.protocol!=='https:'||u.hostname!=='share-h5.xbloom.com'||u.pathname!=='/')return null;
+    const id=u.searchParams.get('id');
+    if(!id||id.length>250||!/^[A-Za-z0-9+/=]+$/.test(id))return null;
+    return 'https://share-h5.xbloom.com/?id='+encodeURIComponent(id);
+  } catch {return null;}
+}
+function authForList(creds){
+  return {
+    interfaceVersion:20240918,skey:'testskey',phoneType:'Android',
+    memberId:creds.memberId,clientType:2,languageType:1,token:creds.token,
+    pageNumber:1,countPerPage:100,adaptedModel:1
+  };
+}
+async function listOwnRecipes(creds){
+  const data=await apiCall('tuMyTeaRecipeCreated.tuhtml',authForList(creds),true);
+  return data.result==='success'&&Array.isArray(data.list)?data.list:null;
+}
+async function verifyOfficialShare(url,expectedTableId,expectedDose){
+  const share=officialShareUrl(url);
+  if(!share)return false;
+  const id=new URL(share).searchParams.get('id');
+  const data=await apiCall('RecipeDetail.html',{
+    tableIdOfRSA:id,interfaceVersion:19700101,skey:'testskey'
+  });
+  const v=data.recipeVo;
+  return data.result==='success'&&v&&
+    String(v.tableId)===String(expectedTableId)&&
+    Math.abs(Number(v.dose)-Number(expectedDose))<=0.05;
+}
 export default async function handler(req,res){
   res.setHeader('Cache-Control','no-store');
   const origin=req.headers.origin||'';
@@ -107,20 +141,16 @@ export default async function handler(req,res){
       });
       if(login.result!=='success'||!login.member?.tableId||!login.token)
         return fail(res,502,'xbloom_login_failed');
-      const auth={
-        interfaceVersion:20240918,skey:'testskey',phoneType:'Android',
-        memberId:login.member.tableId,clientType:2,languageType:1,token:login.token,
-        pageNumber:1,countPerPage:100,adaptedModel:1
-      };
-      const listed=await apiCall('tuMyTeaRecipeCreated.tuhtml',auth,true);
-      if(listed.result!=='success')return fail(res,502,'xbloom_list_failed');
-      const tests=(Array.isArray(listed.list)?listed.list:[])
+      const creds={memberId:login.member.tableId,token:login.token};
+      const listed=await listOwnRecipes(creds);
+      if(!listed)return fail(res,502,'xbloom_list_failed');
+      const tests=listed
         .filter(item=>typeof item.theName==='string'&&item.theName.startsWith('MIYAR INTEGRATION TEST'))
-        .slice(0,8).map(item=>{
-          const id=String(item.tableId||'');
-          return {name:item.theName,dose:item.dose,grindSize:item.grinderSize,
-            shareUrl:id?SHARE+'?id='+encodeURIComponent(Buffer.from(id).toString('base64')):null};
-        });
+        .slice(0,8).map(item=>({
+          name:item.theName,dose:item.dose,grindSize:item.grinderSize,
+          shareUrl:officialShareUrl(item.shareRecipeLink), // provider-issued, never fabricated
+          providerId:String(item.tableId||'')
+        }));
       return res.status(200).json({status:'listed',testRecipes:tests});
     }catch(error){
       console.error('miyar_list_error',String(error?.message||error).slice(0,70));
@@ -160,23 +190,34 @@ export default async function handler(req,res){
         ?text.slice(0,140):null;
       return res.status(502).json({status:'error',error:'xbloom_create_failed',stage:'save',providerResult:kind,providerMessage:safeMessage});
     }
-    const id=Buffer.from(String(created.tableId)).toString('base64');
-    const shareUrl=SHARE+'?id='+encodeURIComponent(id);
-    let verified;
-    try {
-      verified=await apiCall('RecipeDetail.html',{
-        tableIdOfRSA:id,interfaceVersion:19700101,skey:'testskey'
+    // Creation succeeded. Obtain the share link FROM xBloom, never derive it from tableId.
+    const targetId=String(created.tableId);
+    let shareUrl=officialShareUrl(created.shareRecipeLink);
+    for(let attempt=0;attempt<3&&!shareUrl;attempt++){
+      if(attempt)await new Promise(resolve=>setTimeout(resolve,500));
+      const list=await listOwnRecipes({memberId:login.member.tableId,token:login.token})
+        .catch(()=>null);
+      const matched=list?.find(item=>String(item.tableId)===targetId);
+      if(matched)shareUrl=officialShareUrl(matched.shareRecipeLink);
+    }
+    if(!shareUrl){
+      // A real record might exist; do not retry saving or invent an invalid share link.
+      return res.status(202).json({
+        status:'saved_unverified',error:'official_share_link_pending',
+        recipeId:targetId,verified:false,retry:false
       });
-    } catch {
-      // Creation succeeded; preserve the real provider-sourced link for manual confirmation.
-      return res.status(202).json({status:'saved_unverified',shareUrl,verified:false,retry:false,error:'share_verification_failed'});
     }
-    if(verified.result!=='success'||!verified.recipeVo ||
-       Math.abs(Number(verified.recipeVo.dose)-recipe.dose)>.05) {
-      // This URL came from a real tableId, but cannot yet be independently confirmed.
-      return res.status(202).json({status:'saved_unverified',shareUrl,verified:false,retry:false,error:'share_verification_failed'});
+    try{
+      if(await verifyOfficialShare(shareUrl,targetId,recipe.dose)){
+        return res.status(201).json({status:'ready',shareUrl,verified:true});
+      }
+    }catch(error){
+      console.error('miyar_share_verify_error',String(error?.message||error).slice(0,60));
     }
-    return res.status(201).json({status:'ready',shareUrl,verified:true});
+    return res.status(202).json({
+      status:'saved_unverified',shareUrl,verified:false,retry:false,
+      error:'share_verification_pending'
+    });
   } catch(error) {
     const cause=String(error?.message||error).slice(0,70);
     console.error('miyar_export_error',cause);
