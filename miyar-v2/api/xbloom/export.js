@@ -151,7 +151,15 @@ export default async function handler(req,res){
     };
     // WARNING: this is a write to an unofficial API. Never retry automatically.
     const created=await apiCall('tuRecipeAdd.tuhtml',payload,true);
-    if(created.result!=='success'||!created.tableId)return fail(res,502,'xbloom_create_failed');
+    if(created.result!=='success'||!created.tableId) {
+      // Return non-secret failure classification; do not expose provider credentials.
+      const kind=String(created.result||'no_result').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,32);
+      const text=[created.msg,created.message,created.errorMsg,created.errorMessage,created.reason]
+        .find(v=>typeof v==='string'&&v.trim());
+      const safeMessage=typeof text==='string'&&!/token|password|secret|bearer|login credential/i.test(text)
+        ?text.slice(0,140):null;
+      return res.status(502).json({status:'error',error:'xbloom_create_failed',stage:'save',providerResult:kind,providerMessage:safeMessage});
+    }
     const id=Buffer.from(String(created.tableId)).toString('base64');
     const shareUrl=SHARE+'?id='+encodeURIComponent(id);
     let verified;
@@ -170,7 +178,13 @@ export default async function handler(req,res){
     }
     return res.status(201).json({status:'ready',shareUrl,verified:true});
   } catch(error) {
-    console.error('miyar_export_error',String(error?.message||error).slice(0,70));
-    return fail(res,502,'xbloom_transport_or_api_error');
+    const cause=String(error?.message||error).slice(0,70);
+    console.error('miyar_export_error',cause);
+    const kind=/^upstream_http_\d{3}$/.test(cause)?cause:
+      cause==='upstream_invalid_json'?'upstream_invalid_json':
+      cause==='This operation was aborted'?'upstream_timeout':'upstream_error';
+    // The save might have succeeded despite a network timeout; never auto-retry.
+    return res.status(502).json({status:'error',error:'xbloom_transport_or_api_error',stage:'unknown',cause:kind,possibleDuplicate:true});
+  
   }
 }
