@@ -68,10 +68,15 @@
     const pauses=variant==='aroma'?[33,10,9,8,0]:[32,13,11,0];
     const flows=variant==='aroma'?[3,3.2,3.2,3.3,3.3]:[3,3.2,3.3,3.2];
     const pours=volumes.map((ml,i)=>({ml,temp:clamp(baseTemp-(i===volumes.length-1?1:0),40,95),flow:flows[i],pattern:patterns[i],pause:pauses[i],before:false,after:false}));
-    return {schema:'miyar.recipe.v2',id:`r_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`,
+    const recipe={schema:'miyar.recipe.v2',id:`r_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`,
       device:'studio',dripper:input.dripper||'omni',mode:'hot',name:(input.name||'محصول جديد').trim().slice(0,100),roaster:(input.roaster||'').trim().slice(0,100),origin:input.origin||'',process:input.process||'unknown',roast:input.roast||'light',notes:input.notes||'',
       variant,water,dose,ratio:round(water/dose,2),grind,rpm:90,pours,createdAt:new Date().toISOString(),version:1,history:[],
-      provenance:{type:'calculated',dataSources:['مدخلات المستخدم','قواعد استخلاص أولية'],confidence:'experimental',tasted:false,preferencesUsed:passport?{clarity:passport.clarity,sweet:passport.sweet}:null}}
+      provenance:{type:'calculated',dataSources:['مدخلات المستخدم','قواعد استخلاص أولية'],confidence:'experimental',tasted:false,preferencesUsed:passport?{clarity:passport.clarity,sweet:passport.sweet}:null}};
+    // All newly calculated recipes must already be xBloom-compatible.
+    const aligned=alignXbloom(recipe);
+    aligned.recipe.provenance.requestedWater=water;
+    aligned.recipe.provenance.waterAdjusted=aligned.changed;
+    return aligned.recipe;
   }
   // Convert a calculated recipe into an exact xBloom Studio dose/ratio/pour total.
   // Compatible cloud recipes use half-step brew ratios and whole-ml pours.
