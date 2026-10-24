@@ -151,7 +151,14 @@ export default async function handler(req,res){
           shareUrl:officialShareUrl(item.shareRecipeLink), // provider-issued, never fabricated
           providerId:String(item.tableId||'')
         }));
-      return res.status(200).json({status:'listed',testRecipes:tests});
+      const recentRecipes=listed.slice(0,25).map(item=>({
+        name:String(item.theName||'').slice(0,100),
+        dose:Number(item.dose)||0,
+        ratio:Number(item.grandWater)||0,
+        grinderSize:Number(item.grinderSize)||0,
+        shareUrl:officialShareUrl(item.shareRecipeLink)
+      }));
+      return res.status(200).json({status:'listed',testRecipes:tests,recentRecipes});
     }catch(error){
       console.error('miyar_list_error',String(error?.message||error).slice(0,70));
       return fail(res,502,'xbloom_list_transport_error');
@@ -184,7 +191,7 @@ export default async function handler(req,res){
     if(created.result!=='success'||!created.tableId) {
       // Return non-secret failure classification; do not expose provider credentials.
       const kind=String(created.result||'no_result').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,32);
-      const text=[created.msg,created.message,created.errorMsg,created.errorMessage,created.reason]
+      const text=[created.msg,created.message,created.errorMsg,created.errorMessage,created.reason,created.info,created.tips]
         .find(v=>typeof v==='string'&&v.trim());
       const safeMessage=typeof text==='string'&&!/token|password|secret|bearer|login credential/i.test(text)
         ?text.slice(0,140):null;
