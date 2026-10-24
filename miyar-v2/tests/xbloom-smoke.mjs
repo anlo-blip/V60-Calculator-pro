@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import vm from 'node:vm';
 const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
-const scripts=[...html.matchAll(/<script[^>]*>([\\s\\S]*?)<\\/script>/g)].map(x=>x[1]).filter(x=>x.trim());
+const scripts=[...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(x=>x[1]).filter(x=>x.trim());
 assert.ok(scripts.length>=2,'Expected engine and frontend');
 scripts.forEach(s=>new vm.Script(s));
 const context={};
