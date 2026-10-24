@@ -98,6 +98,34 @@ export default async function handler(req,res){
   let input;
   try {input=typeof req.body==='string'?JSON.parse(req.body):req.body||{};}
   catch {return fail(res,400,'invalid_json');}
+  if(input.action==='inspect_test'){
+    try{
+      const login=await apiCall('tMemberLogin.thtml',{
+        interfaceVersion:20240918,skey:'testskey',clientType:2,
+        phoneType:'Android',languageType:1,email,password
+      });
+      if(login.result!=='success'||!login.member?.tableId||!login.token)
+        return fail(res,502,'xbloom_login_failed');
+      const auth={
+        interfaceVersion:20240918,skey:'testskey',phoneType:'Android',
+        memberId:login.member.tableId,clientType:2,languageType:1,token:login.token,
+        pageNumber:1,countPerPage:100,adaptedModel:1
+      };
+      const listed=await apiCall('tuMyTeaRecipeCreated.tuhtml',auth,true);
+      if(listed.result!=='success')return fail(res,502,'xbloom_list_failed');
+      const tests=(Array.isArray(listed.list)?listed.list:[])
+        .filter(item=>typeof item.theName==='string'&&item.theName.startsWith('MIYAR INTEGRATION TEST'))
+        .slice(0,8).map(item=>{
+          const id=String(item.tableId||'');
+          return {name:item.theName,dose:item.dose,grindSize:item.grinderSize,
+            shareUrl:id?SHARE+'?id='+encodeURIComponent(Buffer.from(id).toString('base64')):null};
+        });
+      return res.status(200).json({status:'listed',testRecipes:tests});
+    }catch(error){
+      console.error('miyar_list_error',String(error?.message||error).slice(0,70));
+      return fail(res,502,'xbloom_list_transport_error');
+    }
+  }
   let prepared;
   try {prepared=validate(input.recipe,input.verifiedGrinderSize);}
   catch(e){return fail(res,422,e.message);}
