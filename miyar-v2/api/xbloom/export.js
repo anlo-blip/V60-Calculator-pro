@@ -152,15 +152,21 @@ export default async function handler(req,res){
     const created=await apiCall('tuRecipeAdd.tuhtml',payload,true);
     if(created.result!=='success'||!created.tableId)return fail(res,502,'xbloom_create_failed');
     const id=Buffer.from(String(created.tableId)).toString('base64');
-    const verified=await apiCall('RecipeDetail.html',{
-      tableIdOfRSA:id,interfaceVersion:19700101,skey:'testskey'
-    });
+    const shareUrl=SHARE+'?id='+encodeURIComponent(id);
+    let verified;
+    try {
+      verified=await apiCall('RecipeDetail.html',{
+        tableIdOfRSA:id,interfaceVersion:19700101,skey:'testskey'
+      });
+    } catch {
+      // Creation succeeded; preserve the real provider-sourced link for manual confirmation.
+      return res.status(202).json({status:'saved_unverified',shareUrl,verified:false,retry:false,error:'share_verification_failed'});
+    }
     if(verified.result!=='success'||!verified.recipeVo ||
        Math.abs(Number(verified.recipeVo.dose)-recipe.dose)>.05) {
-      // Recipe may exist; tell caller not to repeat blindly.
-      return res.status(202).json({status:'saved_unverified',error:'share_verification_failed',retry:false});
+      // This URL came from a real tableId, but cannot yet be independently confirmed.
+      return res.status(202).json({status:'saved_unverified',shareUrl,verified:false,retry:false,error:'share_verification_failed'});
     }
-    const shareUrl=SHARE+'?id='+encodeURIComponent(id);
     return res.status(201).json({status:'ready',shareUrl,verified:true});
   } catch(error) {
     console.error('miyar_export_error',String(error?.message||error).slice(0,70));
