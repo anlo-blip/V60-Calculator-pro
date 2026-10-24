@@ -73,6 +73,48 @@
       variant,water,dose,ratio:round(water/dose,2),grind,rpm:90,pours,createdAt:new Date().toISOString(),version:1,history:[],
       provenance:{type:'calculated',dataSources:['مدخلات المستخدم','قواعد استخلاص أولية'],confidence:'experimental',tasted:false,preferencesUsed:passport?{clarity:passport.clarity,sweet:passport.sweet}:null}}
   }
+  // Convert a calculated recipe into an exact xBloom Studio dose/ratio/pour total.
+  // Compatible cloud recipes use half-step brew ratios and whole-ml pours.
+  // No values are transmitted by this function. Caller must show changes for consent.
+  function alignXbloom(r){
+    const current=clone(r);
+    if(!Number.isFinite(current.water)||!Number.isFinite(current.dose)||!Array.isArray(current.pours))
+      throw new Error('Invalid brew');
+    const wantedWater=current.water;
+    const wantedDose=current.dose;
+    const wantedRatio=current.water/current.dose;
+    let best=null;
+    for(let half=20;half<=44;half++){
+      const ratio=half/2;
+      for(let tenth=50;tenth<=180;tenth++){
+        const dose=tenth/10;
+        const proposed=dose*ratio;
+        const water=Math.round(proposed);
+        // Exact whole ml water: never submit rounded-off pour totals.
+        if(Math.abs(proposed-water)>1e-7||water<120||water>288)continue;
+        const waterDiff=Math.abs(water-wantedWater);
+        const ratioDiff=Math.abs(ratio-wantedRatio);
+        const doseDiff=Math.abs(dose-wantedDose);
+        const score=waterDiff*2+ratioDiff*9+doseDiff*1.2;
+        if(!best||score<best.score-1e-9)best={water,dose,ratio,score};
+      }
+    }
+    if(!best)throw new Error('No compatible dose and volume');
+    current.water=best.water;
+    current.dose=best.dose;
+    current.ratio=best.ratio;
+    const changed=current.water!==r.water||Math.abs(current.dose-r.dose)>1e-7;
+    if(changed){
+      const sum=current.pours.reduce((total,p)=>total+Math.max(1,Number(p.ml)||1),0);
+      const volumes=distribute(current.water,current.pours.map(p=>Math.max(1,Number(p.ml)||1)/sum));
+      current.pours.forEach((p,i)=>p.ml=volumes[i]);
+      current.version=(current.version||1)+1;
+      current.history=Array.isArray(current.history)?current.history:[];
+      current.history.push({at:new Date().toISOString(),type:'xbloom_dose_ratio_alignment',
+        from:{dose:r.dose,water:r.water},to:{dose:best.dose,water:best.water,ratio:best.ratio}});
+    }
+    return {recipe:current,changed,requestedWater:wantedWater,actualWater:best.water};
+  }
   function balancePours(r){
     const next=clone(r);const sum=next.pours.reduce((a,p)=>a+Math.max(1,Number(p.ml)||1),0);
     const volumes=distribute(next.water,next.pours.map(p=>Math.max(1,Number(p.ml)||1)/sum));
@@ -97,7 +139,7 @@
     return {recipe:next,change:{...suggestion,from:previous,to:next[key]}};
   }
   function difference(a,b){return [{label:'الطحن',a:a.grind,b:b.grind,unit:''},{label:'البن',a:a.dose,b:b.dose,unit:'غ'},{label:'الماء',a:a.water,b:b.water,unit:'مل'},{label:'الصبات',a:a.pours.length,b:b.pours.length,unit:''},{label:'المدة التقريبية',a:duration(a),b:duration(b),unit:'ث'}];}
-  const api={LIMITS,PATTERNS,TASTE,distribute,makeRecipe,validate,balancePours,updatePour,duration,agenda,adjust,difference,clone};
+  const api={LIMITS,PATTERNS,TASTE,distribute,makeRecipe,validate,alignXbloom,balancePours,updatePour,duration,agenda,adjust,difference,clone};
   root.MiyarEngine=api;if(typeof module!=='undefined'&&module.exports)module.exports=api;
 })(typeof window!=='undefined'?window:globalThis);
 
